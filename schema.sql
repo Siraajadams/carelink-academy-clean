@@ -1,124 +1,208 @@
--- CareLink Academy Supabase Schema
+ "use client";
 
-create table if not exists profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  full_name text,
-  country text check (country in ('England', 'Wales', 'Scotland', 'South Africa', 'New Zealand')),
-  role text check (role in ('Doctor', 'Pharmacist', 'Nurse', 'Counsellor', 'Psychologist', 'Pharmacy Assistant', 'Admin')),
-  registration_number text,
-  organisation text,
-  platform_access_needed text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import TopNav from "@/components/TopNav";
 
-create table if not exists modules (
-  id uuid primary key default gen_random_uuid(),
-  title text not null,
-  description text,
-  country text default 'Global',
-  role text default 'All',
-  content_type text check (content_type in ('SOP', 'Video', 'Slide Deck', 'Policy', 'Checklist', 'Other')) default 'Other',
-  content_url text,
-  sort_order int default 1,
-  created_at timestamptz default now()
-);
+type Contract = {
+  id: string;
+  title: string;
+  role: string;
+  country: string;
+  contract_url: string;
+  version: string;
+  description: string;
+};
 
-create table if not exists progress (
-  user_id uuid references auth.users(id) on delete cascade,
-  module_id uuid references modules(id) on delete cascade,
-  completed boolean default false,
-  completed_at timestamptz,
-  primary key (user_id, module_id)
-);
+type Signature = {
+  contract_id: string;
+  accepted: boolean;
+  signer_name: string;
+  signature_text: string;
+  signed_at: string;
+};
 
-create table if not exists assessments (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade,
-  assessment_name text,
-  score int,
-  passed boolean,
-  created_at timestamptz default now()
-);
+export default function ContractsPage() {
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [signatures, setSignatures] = useState<Record<string, Signature>>({});
+  const [userId, setUserId] = useState("");
+  const [profile, setProfile] = useState<any>(null);
+  const [active, setActive] = useState<Contract | null>(null);
+  const [form, setForm] = useState({
+    signer_name: "",
+    signature_text: "",
+    identity_or_registration_number: "",
+    email: "",
+    mobile: "",
+    accepted_terms: false
+  });
+  const [message, setMessage] = useState("");
 
-alter table profiles enable row level security;
-alter table modules enable row level security;
-alter table progress enable row level security;
-alter table assessments enable row level security;
+  useEffect(() => {
+    async function load() {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return;
+      setUserId(userData.user.id);
 
-create policy "Users can view own profile" on profiles for select using (auth.uid() = id);
-create policy "Users can insert own profile" on profiles for insert with check (auth.uid() = id);
-create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+      const { data: p } = await supabase.from("profiles").select("*").eq("id", userData.user.id).single();
+      setProfile(p);
+      setForm(f => ({ ...f, signer_name: p?.full_name || "" }));
 
-create policy "Authenticated users can view modules" on modules for select using (auth.role() = 'authenticated');
+      const country = p?.country || "South Africa";
+      const role = p?.role || "Doctor";
 
-create policy "Users can view own progress" on progress for select using (auth.uid() = user_id);
-create policy "Users can insert own progress" on progress for insert with check (auth.uid() = user_id);
-create policy "Users can update own progress" on progress for update using (auth.uid() = user_id);
+      const { data: contractData } = await supabase
+        .from("contracts")
+        .select("*")
+        .eq("is_active", true)
+        .or(`country.eq.Global,country.eq.${country}`)
+        .or(`role.eq.All,role.eq.${role}`)
+        .order("created_at", { ascending: false });
 
-create policy "Users can view own assessments" on assessments for select using (auth.uid() = user_id);
-create policy "Users can insert own assessments" on assessments for insert with check (auth.uid() = user_id);
+      const { data: sigData } = await supabase.from("contract_signatures").select("*").eq("user_id", userData.user.id);
 
-insert into modules (title, description, country, role, content_type, content_url, sort_order) values
-('Welcome to CareLink Academy', 'Introduction to the digital healthcare onboarding journey.', 'Global', 'All', 'Video', 'https://drive.google.com', 1),
-('Digital Health Privacy and Consent', 'Core privacy, confidentiality and consent principles for digital care.', 'Global', 'All', 'Policy', 'https://drive.google.com', 2),
-('CareLink Booking Workflow', 'How to manage appointment requests and patient bookings.', 'Global', 'All', 'SOP', 'https://drive.google.com', 3),
-('Videomed Consultation Workflow', 'How GP-in-pharmacy virtual consultations are managed.', 'South Africa', 'Pharmacist', 'Slide Deck', 'https://drive.google.com', 4),
-('CPNBS Pharmacy Workflow', 'Training pathway for community pharmacy booking services.', 'England', 'Pharmacist', 'SOP', 'https://drive.google.com', 5),
-('New Zealand Digital Care Workflow', 'Country-specific introduction for New Zealand users.', 'New Zealand', 'All', 'SOP', 'https://drive.google.com', 6);
+      const sigMap: Record<string, Signature> = {};
+      sigData?.forEach((s: any) => sigMap[s.contract_id] = s);
 
+      setContracts(contractData || []);
+      setSignatures(sigMap);
+      if ((contractData || []).length) setActive((contractData || [])[0]);
+    }
+    load();
+  }, []);
 
--- Contract templates and electronic sign-off
+  async function signContract() {
+    setMessage("");
+    if (!active) return;
+    if (!form.accepted_terms) {
+      setMessage("Please tick the confirmation checkbox before signing.");
+      return;
+    }
+    if (!form.signer_name || !form.signature_text) {
+      setMessage("Please enter your full name and type your signature.");
+      return;
+    }
 
-create table if not exists contracts (
-  id uuid primary key default gen_random_uuid(),
-  title text not null,
-  description text,
-  role text default 'All',
-  country text default 'Global',
-  version text default '1.0',
-  contract_url text not null,
-  is_active boolean default true,
-  created_at timestamptz default now()
-);
+    const payload = {
+      user_id: userId,
+      contract_id: active.id,
+      signer_name: form.signer_name,
+      signature_text: form.signature_text,
+      identity_or_registration_number: form.identity_or_registration_number,
+      email: form.email,
+      mobile: form.mobile,
+      accepted: true,
+      ip_acknowledgement: "User confirmed contract review and electronic sign-off inside CareLink Academy.",
+      signed_at: new Date().toISOString()
+    };
 
-create table if not exists contract_signatures (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade,
-  contract_id uuid references contracts(id) on delete cascade,
-  signer_name text not null,
-  signature_text text not null,
-  identity_or_registration_number text,
-  email text,
-  mobile text,
-  accepted boolean default true,
-  ip_acknowledgement text,
-  signed_at timestamptz default now(),
-  unique(user_id, contract_id)
-);
+    const { error } = await supabase.from("contract_signatures").upsert(payload, {
+      onConflict: "user_id,contract_id"
+    });
 
-alter table contracts enable row level security;
-alter table contract_signatures enable row level security;
+    if (error) setMessage(error.message);
+    else {
+      setSignatures({ ...signatures, [active.id]: payload as any });
+      setMessage("Contract signed and recorded.");
+    }
+  }
 
-create policy "Authenticated users can view active contracts" on contracts
-  for select using (auth.role() = 'authenticated' and is_active = true);
+  return (
+    <>
+      <TopNav />
+      <main className="mx-auto max-w-6xl px-6 py-10">
+        <div className="rounded-3xl bg-careblue p-8 text-white">
+          <h1 className="text-3xl font-bold">Contract Review & Sign-off</h1>
+          <p className="mt-2 max-w-3xl text-carelight">
+            Review your assigned contract, confirm that you understand it, and sign electronically.
+            Future contract templates can be loaded for pharmacists, nurses, psychologists and other healthcare workers.
+          </p>
+        </div>
 
-create policy "Authenticated users can add contract templates" on contracts
-  for insert with check (auth.role() = 'authenticated');
+        <div className="mt-8 grid gap-6 md:grid-cols-3">
+          <section className="rounded-3xl bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold">Assigned contracts</h2>
+            <div className="mt-4 space-y-3">
+              {contracts.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setActive(c)}
+                  className={`w-full rounded-2xl border p-4 text-left ${active?.id === c.id ? "border-careblue bg-carelight" : ""}`}
+                >
+                  <p className="font-bold">{c.title}</p>
+                  <p className="text-xs text-slate-600">{c.role} · {c.country} · v{c.version}</p>
+                  <p className="mt-1 text-xs">{signatures[c.id]?.accepted ? "Signed" : "Awaiting sign-off"}</p>
+                </button>
+              ))}
+            </div>
+          </section>
 
-create policy "Users can view own contract signatures" on contract_signatures
-  for select using (auth.uid() = user_id);
+          <section className="md:col-span-2 rounded-3xl bg-white p-5 shadow-sm">
+            {active ? (
+              <>
+                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                  <div>
+                    <h2 className="text-2xl font-bold text-careblue">{active.title}</h2>
+                    <p className="mt-1 text-sm text-slate-600">{active.description}</p>
+                    <p className="mt-1 text-xs text-slate-500">For: {profile?.role || active.role} · {profile?.country || active.country}</p>
+                  </div>
+                  <a href={active.contract_url} target="_blank" className="rounded-xl bg-careblue px-4 py-3 text-center text-sm font-semibold text-white">
+                    Open contract
+                  </a>
+                </div>
 
-create policy "Users can insert own contract signatures" on contract_signatures
-  for insert with check (auth.uid() = user_id);
+                <div className="mt-5 overflow-hidden rounded-2xl border">
+                  {active.contract_url?.toLowerCase().endsWith(".pdf") ? (
+                    <iframe src={active.contract_url} className="h-[520px] w-full" />
+                  ) : (
+                    <div className="bg-slate-50 p-6 text-sm text-slate-700">
+                      <p className="font-semibold">Document preview</p>
+                      <p className="mt-2">
+                        This contract is a Word document. Click “Open contract” to review it.
+                        For production, save final contracts as PDF for browser preview.
+                      </p>
+                    </div>
+                  )}
+                </div>
 
-create policy "Users can update own contract signatures" on contract_signatures
-  for update using (auth.uid() = user_id);
+                <div className="mt-6 rounded-2xl bg-carelight p-5">
+                  <h3 className="font-bold text-careblue">Electronic sign-off</h3>
+                  <p className="mt-1 text-sm text-slate-700">
+                    By signing, the healthcare worker confirms that they have reviewed the contract, understand the onboarding obligations, and accept electronic sign-off.
+                  </p>
 
-insert into contracts (title, description, role, country, version, contract_url, is_active) values
-('VideoMed Doctor in a Pharmacy Contract', 'Doctor onboarding contract for VideoMed doctor-in-pharmacy services, including appointment, obligations, confidentiality, personal information, payment provisions and service description.', 'Doctor', 'South Africa', '1.0', '/documents/VideoMed Doctors Contract.docx', true)
-on conflict do nothing;
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <input className="rounded-xl border p-3" placeholder="Full name" value={form.signer_name} onChange={e => setForm({...form, signer_name: e.target.value})} />
+                    <input className="rounded-xl border p-3" placeholder="Registration / ID number" value={form.identity_or_registration_number} onChange={e => setForm({...form, identity_or_registration_number: e.target.value})} />
+                    <input className="rounded-xl border p-3" placeholder="Email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+                    <input className="rounded-xl border p-3" placeholder="Mobile" value={form.mobile} onChange={e => setForm({...form, mobile: e.target.value})} />
+                    <input className="rounded-xl border p-3 md:col-span-2" placeholder="Type your full name as signature" value={form.signature_text} onChange={e => setForm({...form, signature_text: e.target.value})} />
+                  </div>
 
-insert into modules (title, description, country, role, content_type, content_url, sort_order) values
-('VideoMed Doctor Operations Guide', 'Doctor onboarding guide covering platform registration, CareLink bookings, attendance, services, billing, medical aid, pathology, stock, room safety and key contacts.', 'South Africa', 'Doctor', 'SOP', '/documents/videomed_doctor_guide.pdf', 7),
-('Contract Review and Electronic Sign-off', 'Review the assigned contract and complete electronic sign-off before platform activation.', 'South Africa', 'Doctor', 'Checklist', '/contracts', 8);
+                  <label className="mt-4 flex gap-3 text-sm">
+                    <input type="checkbox" checked={form.accepted_terms} onChange={e => setForm({...form, accepted_terms: e.target.checked})} />
+                    <span>I confirm that I have reviewed this contract and agree to sign electronically.</span>
+                  </label>
+
+                  <button onClick={signContract} className="mt-5 rounded-xl bg-careblue px-6 py-3 font-semibold text-white">
+                    Sign and submit
+                  </button>
+
+                  {signatures[active.id]?.accepted && (
+                    <p className="mt-4 rounded-xl bg-green-100 p-3 text-sm font-semibold text-green-700">
+                      Signed by {signatures[active.id].signer_name} on {new Date(signatures[active.id].signed_at).toLocaleString()}.
+                    </p>
+                  )}
+
+                  {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
+                </div>
+              </>
+            ) : (
+              <p>No contract assigned yet.</p>
+            )}
+          </section>
+        </div>
+      </main>
+    </>
+  );
+}

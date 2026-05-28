@@ -1,29 +1,25 @@
-# CareLink Academy Deployment Checklist
+import TopNav from "@/components/TopNav";
 
-## GitHub
-1. Create a new repository called `carelink-academy`.
-2. Upload or push this project folder.
-3. Do not upload `.env.local`.
-
-## Supabase
-1. Create a Supabase project.
-2. Open SQL Editor.
-3. Paste and run `supabase/schema.sql`.
-4. Go to Authentication > URL Configuration.
-5. Add your Vercel URL after deployment.
-6. Optional: Create Supabase Storage bucket called `contracts` for production contract files.
-
-## Vercel
-1. Import GitHub repo.
-2. Add environment variables:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-3. Deploy.
-
-## Recommended content hosting
-- Use Google Drive or Supabase Storage for PDFs and SOPs.
-- Use YouTube unlisted, Vimeo, or Google Drive for training videos.
-- Store only links in the `modules` and `contracts` tables to reduce hosting costs.
-
-## Legal note
-The included e-signature is a typed acknowledgement workflow. Ask a legal advisor to confirm whether it is sufficient for each jurisdiction.
+export default function GuidePage() {
+  return (
+    <>
+      <TopNav />
+      <main className="mx-auto max-w-5xl px-6 py-10">
+        <div className="rounded-3xl bg-white p-8 shadow-sm">
+          <h1 className="text-3xl font-bold text-careblue">VideoMed Doctor Operations Guide</h1>
+          <p className="mt-2 text-slate-600">
+            Review the onboarding guide before completing platform training. The guide covers platform registration,
+            CareLink bookings, attendance and leave, services offered, billing, medical aid process, pathology, stock,
+            room safety, community outreach and key contacts.
+          </p>
+          <a href="/documents/videomed_doctor_guide.pdf" target="_blank" className="mt-5 inline-block rounded-xl bg-careblue px-5 py-3 font-semibold text-white">
+            Open guide
+          </a>
+          <div className="mt-6 overflow-hidden rounded-2xl border">
+            <iframe src="/documents/videomed_doctor_guide.pdf" className="h-[760px] w-full" />
+          </div>
+        </div>
+      </main>
+    </>
+  );
+}
